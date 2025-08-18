@@ -17,22 +17,68 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-readonly arch=$1
-readonly output_dir=$2
+usage() {
+    echo "Usage: $0 <gcc_version> <arch> <output_dir>"
+    echo ""
+    echo "  gcc_version  GCC version to build"
+    echo "  arch         Target architecture (x86_64, armv7, aarch64)"
+    echo "  output_dir   Directory where the toolchain archive will be saved"
+    echo ""
+    echo "Examples:"
+    echo "  $0 14.3.0 x86_64 ."
+    echo "  $0 13.2.0 aarch64 ."
+    echo ""
+    echo "Output format: gcc-toolchain-{gcc_version}-{arch}.tar.xz"
+}
+
+readonly gcc_version=$1
+readonly arch=$2
+readonly output_dir=$3
 
 set -o errexit -o nounset -o pipefail
 
+# Handle help flag
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+    usage
+    exit 0
+fi
+
+if [ -z "${gcc_version}" ]; then
+    >&2 echo "ERROR: the first argument of the script must be the GCC version."
+    >&2 echo ""
+    usage
+    exit 1
+fi
+
 if [ -z "${arch}" ]; then
-    >&2 echo "ERROR: the first argument of the script must be the architecture."
+    >&2 echo "ERROR: the second argument of the script must be the architecture."
+    >&2 echo ""
+    usage
     exit 1
 fi
 
 if [ -z "${output_dir}" ]; then
-    >&2 echo "ERROR: the second argument of the script must be the output directory."
+    >&2 echo "ERROR: the third argument of the script must be the output directory."
+    >&2 echo ""
+    usage
     exit 1
 fi
 
-output_filename="gcc-toolchain-${arch}.tar.xz"
+# Validate architecture
+case "${arch}" in
+    x86_64|armv7|aarch64)
+        ;;
+    *)
+        >&2 echo "ERROR: unsupported architecture '${arch}'. Supported architectures: x86_64, armv7, aarch64"
+        >&2 echo ""
+        usage
+        exit 1
+        ;;
+esac
+
+echo "INFO: Building GCC ${gcc_version} toolchain for ${arch} architecture..."
+
+output_filename="gcc-toolchain-${gcc_version}-${arch}.tar.xz"
 container_source_dir="/var/builds/toolchain"
 
 echo "INFO: building toolchain inside container..."
@@ -45,6 +91,7 @@ image_tag=$(tr '[:upper:]' '[:lower:]' <<<"${arch}")
 (cd "${build_dir}"; \
     docker build \
         --build-arg ARCH="${arch}" \
+        --build-arg GCC_VERSION="${gcc_version}" \
         --tag "${image_tag}" \
         --target toolchain \
         .)

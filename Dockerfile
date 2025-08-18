@@ -57,8 +57,9 @@ RUN curl --fail-early --location https://ftp.gnu.org/gnu/glibc/glibc-2.26.tar.xz
         | tar --xz --extract --strip-components=1 --file -
 
 FROM base_image AS gcc_download
+ARG GCC_VERSION
 WORKDIR /downloads/gcc
-RUN curl --fail-early --location https://ftp.gnu.org/gnu/gcc/gcc-14.2.0/gcc-14.2.0.tar.xz \
+RUN curl --fail-early --location https://ftp.gnu.org/gnu/gcc/gcc-${GCC_VERSION}/gcc-${GCC_VERSION}.tar.xz \
         | tar --xz --extract --strip-components=1 --file -
 RUN ./contrib/download_prerequisites
 
