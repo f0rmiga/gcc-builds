@@ -109,7 +109,7 @@ RUN curl --fail-early --location https://www.x.org/releases/X11R7.7/src/lib/libX
         | tar --gzip --extract --strip-components=1 --file -
 FROM base_image AS binutils_download
 WORKDIR /downloads/binutils
-RUN curl --fail-early --location https://ftp.gnu.org/gnu/binutils/binutils-2.44.tar.xz \
+RUN curl --fail-early --location https://ftp.gnu.org/gnu/binutils/binutils-2.46.0.tar.xz \
         | tar --xz --extract --strip-components=1 --file -
 FROM base_image AS patchelf_download
 WORKDIR /downloads/patchelf
