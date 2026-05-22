@@ -224,9 +224,19 @@ FROM build_image AS libX11
 COPY --from=gcc /var/install/gcc /var/install/gcc
 ENV PATH="/var/install/gcc/bin:${PATH}"
 
+# Provides an up-to-date config.sub/config.guess that recognizes aarch64. The
+# X11R7.7 (2012) sources built below ship versions too old to know about it,
+# so each package overlays these from /usr/share/misc before configuring.
+RUN apt-get update \
+        && DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get install --yes \
+                autotools-dev \
+        && apt-get clean \
+        && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /build/util-macros/build
 COPY --from=util-macros_download /downloads/util-macros /build/util-macros
-RUN --mount=source=configure.sh,target=/usr/bin/configure.sh IS_GCC_BUILD=1 configure.sh \
+RUN cp /usr/share/misc/config.sub /usr/share/misc/config.guess /build/util-macros/
+RUN --mount=source=configure.sh,target=/usr/bin/configure.sh configure.sh \
         || (cat config.log && exit 1)
 RUN make --jobs $(nproc)
 RUN make install
@@ -234,7 +244,8 @@ RUN make DESTDIR=/var/install/libX11 install
 
 WORKDIR /build/xproto/build
 COPY --from=xproto_download /downloads/xproto /build/xproto
-RUN --mount=source=configure.sh,target=/usr/bin/configure.sh IS_GCC_BUILD=1 configure.sh \
+RUN cp /usr/share/misc/config.sub /usr/share/misc/config.guess /build/xproto/
+RUN --mount=source=configure.sh,target=/usr/bin/configure.sh configure.sh \
         || (cat config.log && exit 1)
 RUN make --jobs $(nproc)
 RUN make install
@@ -242,7 +253,8 @@ RUN make DESTDIR=/var/install/libX11 install
 
 WORKDIR /build/xextproto/build
 COPY --from=xextproto_download /downloads/xextproto /build/xextproto
-RUN --mount=source=configure.sh,target=/usr/bin/configure.sh IS_GCC_BUILD=1 configure.sh \
+RUN cp /usr/share/misc/config.sub /usr/share/misc/config.guess /build/xextproto/
+RUN --mount=source=configure.sh,target=/usr/bin/configure.sh configure.sh \
         || (cat config.log && exit 1)
 RUN make --jobs $(nproc)
 RUN make install
@@ -250,7 +262,8 @@ RUN make DESTDIR=/var/install/libX11 install
 
 WORKDIR /build/kbproto/build
 COPY --from=kbproto_download /downloads/kbproto /build/kbproto
-RUN --mount=source=configure.sh,target=/usr/bin/configure.sh IS_GCC_BUILD=1 configure.sh \
+RUN cp /usr/share/misc/config.sub /usr/share/misc/config.guess /build/kbproto/
+RUN --mount=source=configure.sh,target=/usr/bin/configure.sh configure.sh \
         || (cat config.log && exit 1)
 RUN make --jobs $(nproc)
 RUN make install
@@ -258,7 +271,8 @@ RUN make DESTDIR=/var/install/libX11 install
 
 WORKDIR /build/inputproto/build
 COPY --from=inputproto_download /downloads/inputproto /build/inputproto
-RUN --mount=source=configure.sh,target=/usr/bin/configure.sh IS_GCC_BUILD=1 configure.sh \
+RUN cp /usr/share/misc/config.sub /usr/share/misc/config.guess /build/inputproto/
+RUN --mount=source=configure.sh,target=/usr/bin/configure.sh configure.sh \
         || (cat config.log && exit 1)
 RUN make --jobs $(nproc)
 RUN make install
@@ -266,7 +280,8 @@ RUN make DESTDIR=/var/install/libX11 install
 
 WORKDIR /build/xcb-proto/build
 COPY --from=xcb-proto_download /downloads/xcb-proto /build/xcb-proto
-RUN --mount=source=configure.sh,target=/usr/bin/configure.sh IS_GCC_BUILD=1 configure.sh \
+RUN cp /usr/share/misc/config.sub /usr/share/misc/config.guess /build/xcb-proto/
+RUN --mount=source=configure.sh,target=/usr/bin/configure.sh configure.sh \
         || (cat config.log && exit 1)
 RUN make --jobs $(nproc)
 RUN make install
@@ -274,7 +289,8 @@ RUN make DESTDIR=/var/install/libX11 install
 
 WORKDIR /build/libXau/build
 COPY --from=libXau_download /downloads/libXau /build/libXau
-RUN --mount=source=configure.sh,target=/usr/bin/configure.sh IS_GCC_BUILD=1 configure.sh \
+RUN cp /usr/share/misc/config.sub /usr/share/misc/config.guess /build/libXau/
+RUN --mount=source=configure.sh,target=/usr/bin/configure.sh configure.sh \
         || (cat config.log && exit 1)
 RUN make --jobs $(nproc)
 RUN make install
@@ -282,7 +298,8 @@ RUN make DESTDIR=/var/install/libX11 install
 
 WORKDIR /build/xtrans/build
 COPY --from=xtrans_download /downloads/xtrans /build/xtrans
-RUN --mount=source=configure.sh,target=/usr/bin/configure.sh IS_GCC_BUILD=1 configure.sh \
+RUN cp /usr/share/misc/config.sub /usr/share/misc/config.guess /build/xtrans/
+RUN --mount=source=configure.sh,target=/usr/bin/configure.sh configure.sh \
         || (cat config.log && exit 1)
 RUN make --jobs $(nproc)
 RUN make install
@@ -290,7 +307,8 @@ RUN make DESTDIR=/var/install/libX11 install
 
 WORKDIR /build/libpthread-stubs/build
 COPY --from=libpthread-stubs_download /downloads/libpthread-stubs /build/libpthread-stubs
-RUN --mount=source=configure.sh,target=/usr/bin/configure.sh IS_GCC_BUILD=1 configure.sh \
+RUN cp /usr/share/misc/config.sub /usr/share/misc/config.guess /build/libpthread-stubs/
+RUN --mount=source=configure.sh,target=/usr/bin/configure.sh configure.sh \
         || (cat config.log && exit 1)
 RUN make --jobs $(nproc)
 RUN make install
@@ -298,7 +316,8 @@ RUN make DESTDIR=/var/install/libX11 install
 
 WORKDIR /build/libxcb/build
 COPY --from=libxcb_download /downloads/libxcb /build/libxcb
-RUN --mount=source=configure.sh,target=/usr/bin/configure.sh IS_GCC_BUILD=1 configure.sh \
+RUN cp /usr/share/misc/config.sub /usr/share/misc/config.guess /build/libxcb/
+RUN --mount=source=configure.sh,target=/usr/bin/configure.sh configure.sh \
         || (cat config.log && exit 1)
 RUN make --jobs $(nproc)
 RUN make install
@@ -306,7 +325,8 @@ RUN make DESTDIR=/var/install/libX11 install
 
 WORKDIR /build/libX11/build
 COPY --from=libX11_download /downloads/libX11 /build/libX11
-RUN --mount=source=configure.sh,target=/usr/bin/configure.sh IS_GCC_BUILD=1 configure.sh \
+RUN cp /usr/share/misc/config.sub /usr/share/misc/config.guess /build/libX11/
+RUN --mount=source=configure.sh,target=/usr/bin/configure.sh configure.sh \
         || (cat config.log && exit 1)
 RUN make --jobs $(nproc)
 RUN make install
