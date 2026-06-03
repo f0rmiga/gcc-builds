@@ -112,10 +112,7 @@ WORKDIR /downloads/binutils
 RUN curl --fail-early --location https://ftp.gnu.org/gnu/binutils/binutils-2.46.0.tar.xz \
         | tar --xz --extract --strip-components=1 --file -
 FROM base_image AS llvm_download
-# LLVM 15.x is the newest release that builds with the Bootlin x86_64 toolchain
-# (GCC 7.3.0): LLVM 16+ switched to C++17 and requires GCC >= 7.4. Bumping past
-# 15.x therefore requires building lld with a newer host compiler.
-ARG LLVM_VERSION=15.0.7
+ARG LLVM_VERSION=22.1.7
 WORKDIR /downloads/llvm
 # The LLVM monorepo bundles many subprojects we do not need (clang, mlir, ...).
 # Extract only the components required to build lld: the LLVM core, lld itself,
@@ -137,23 +134,23 @@ RUN curl --fail-early --location https://github.com/NixOS/patchelf/releases/down
 
 FROM base_image AS build_image
 
+ARG BOOTSTRAP_GCC_VERSION=14.3.0
+ARG BOOTSTRAP_RELEASE=22052026
+ARG BOOTSTRAP_BASE_URL=https://github.com/f0rmiga/gcc-builds/releases/download
+
 WORKDIR /opt/gcc/aarch64
-RUN curl --fail-early --location https://toolchains.bootlin.com/downloads/releases/toolchains/aarch64/tarballs/aarch64--glibc--stable-2018.11-1.tar.bz2 \
-        | tar --bzip --extract --strip-components=1 --file -
-WORKDIR /opt/gcc/aarch64/bin
-RUN rm pkg-config
+RUN curl --fail-early --location ${BOOTSTRAP_BASE_URL}/${BOOTSTRAP_RELEASE}/gcc-toolchain-${BOOTSTRAP_GCC_VERSION}-aarch64.tar.xz \
+        | tar --xz --extract --file -
 WORKDIR /opt/gcc/armv7
-RUN curl --fail-early --location https://toolchains.bootlin.com/downloads/releases/toolchains/armv7-eabihf/tarballs/armv7-eabihf--glibc--stable-2018.11-1.tar.bz2 \
-        | tar --bzip --extract --strip-components=1 --file -
+RUN curl --fail-early --location ${BOOTSTRAP_BASE_URL}/${BOOTSTRAP_RELEASE}/gcc-toolchain-${BOOTSTRAP_GCC_VERSION}-armv7.tar.xz \
+        | tar --xz --extract --file -
 WORKDIR /opt/gcc/armv7/bin
-RUN rm pkg-config
-RUN --mount=source=create_symlinks.sh,target=/usr/bin/create_symlinks.sh create_symlinks.sh arm-linux- arm-linux-gnueabihf-
+RUN --mount=source=create_symlinks.sh,target=/usr/bin/create_symlinks.sh create_symlinks.sh arm-linux-gnueabihf- arm-linux-
 WORKDIR /opt/gcc/x86_64
-RUN curl --fail-early --location https://toolchains.bootlin.com/downloads/releases/toolchains/x86-64-core-i7/tarballs/x86-64-core-i7--glibc--stable-2018.11-1.tar.bz2 \
-        | tar --bzip --extract --strip-components=1 --file -
+RUN curl --fail-early --location ${BOOTSTRAP_BASE_URL}/${BOOTSTRAP_RELEASE}/gcc-toolchain-${BOOTSTRAP_GCC_VERSION}-x86_64.tar.xz \
+        | tar --xz --extract --file -
 WORKDIR /opt/gcc/x86_64/bin
-RUN rm pkg-config
-RUN --mount=source=create_symlinks.sh,target=/usr/bin/create_symlinks.sh create_symlinks.sh x86_64-linux-
+RUN --mount=source=create_symlinks.sh,target=/usr/bin/create_symlinks.sh create_symlinks.sh "" x86_64-linux-
 WORKDIR /
 
 ####################################################################################################
@@ -163,7 +160,12 @@ WORKDIR /
 ARG ARCH
 ENV ARCH="${ARCH}"
 RUN if [ -z "${ARCH}" ]; then >&2 echo "Missing ARCH argument"; exit 1; fi
-RUN rm --force /lib/cpp && ln --symbolic "/opt/gcc/${ARCH}/bin/${ARCH}-linux-cpp.br_real" /lib/cpp
+RUN rm --force /lib/cpp \
+        && if [ "${ARCH}" = "armv7" ]; then \
+                ln --symbolic /opt/gcc/armv7/bin/arm-linux-gnueabihf-cpp /lib/cpp; \
+        else \
+                ln --symbolic "/opt/gcc/${ARCH}/bin/${ARCH}-linux-cpp" /lib/cpp; \
+        fi
 
 ENV PATH="/opt/gcc/x86_64/bin:/opt/gcc/${ARCH}/bin:${PATH}"
 
@@ -244,12 +246,6 @@ RUN apt-get update \
                 ninja-build \
         && apt-get clean \
         && rm -rf /var/lib/apt/lists/*
-# lld is a single, inherently cross-target linker, so a single x86_64 host build
-# can link for every target we support. We build it with the same x86_64 Bootlin
-# toolchain used for GCC and binutils so the resulting binary shares their glibc
-# baseline. LLVM_STATIC_LINK_CXX_STDLIB statically links libstdc++ but not libgcc,
-# so we add -static-libgcc explicitly; the resulting binary depends only on glibc.
-# The X86, ARM and AArch64 backends cover x86_64, armv7 and aarch64 respectively.
 RUN cmake -G Ninja \
         -S /build/llvm/llvm \
         -B . \
@@ -269,10 +265,6 @@ RUN cmake -G Ninja \
         -DLLVM_STATIC_LINK_CXX_STDLIB=ON \
         -DCMAKE_EXE_LINKER_FLAGS=-static-libgcc
 RUN ninja lld
-# install-lld installs the unified lld driver plus its flavor symlinks (ld.lld,
-# ld64.lld, lld-link, wasm-ld), which lld registers under the `lld` install
-# component. `gcc -fuse-ld=lld` invokes the ld.lld symlink (the ELF driver); the
-# Mach-O/COFF/wasm symlinks are unused on Linux but harmless.
 RUN ninja install-lld
 
 ####################################################################################################
