@@ -111,6 +111,25 @@ FROM base_image AS binutils_download
 WORKDIR /downloads/binutils
 RUN curl --fail-early --location https://ftp.gnu.org/gnu/binutils/binutils-2.46.0.tar.xz \
         | tar --xz --extract --strip-components=1 --file -
+FROM base_image AS llvm_download
+# LLVM 15.x is the newest release that builds with the Bootlin x86_64 toolchain
+# (GCC 7.3.0): LLVM 16+ switched to C++17 and requires GCC >= 7.4. Bumping past
+# 15.x therefore requires building lld with a newer host compiler.
+ARG LLVM_VERSION=15.0.7
+WORKDIR /downloads/llvm
+# The LLVM monorepo bundles many subprojects we do not need (clang, mlir, ...).
+# Extract only the components required to build lld: the LLVM core, lld itself,
+# the shared CMake modules and the third-party tree referenced by the build.
+# lld's Mach-O backend also includes mach-o/compact_unwind_encoding.h from
+# libunwind/include (referenced as ../libunwind/include from the llvm source
+# root), so that header tree is needed even though we do not build libunwind.
+RUN curl --fail-early --location https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/llvm-project-${LLVM_VERSION}.src.tar.xz \
+        | tar --xz --extract --strip-components=1 --file - \
+                "llvm-project-${LLVM_VERSION}.src/cmake" \
+                "llvm-project-${LLVM_VERSION}.src/third-party" \
+                "llvm-project-${LLVM_VERSION}.src/libunwind/include" \
+                "llvm-project-${LLVM_VERSION}.src/llvm" \
+                "llvm-project-${LLVM_VERSION}.src/lld"
 FROM base_image AS patchelf_download
 WORKDIR /downloads/patchelf
 RUN curl --fail-early --location https://github.com/NixOS/patchelf/releases/download/0.18.0/patchelf-0.18.0-x86_64.tar.gz \
@@ -215,6 +234,46 @@ RUN --mount=source=configure.sh,target=/usr/bin/configure.sh IS_GCC_BUILD=1 conf
         || (cat config.log && exit 1)
 RUN make --jobs $(nproc)
 RUN make install
+
+FROM build_image AS lld
+COPY --from=llvm_download /downloads/llvm /build/llvm
+WORKDIR /build/llvm/build
+RUN apt-get update \
+        && DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get install --yes \
+                cmake \
+                ninja-build \
+        && apt-get clean \
+        && rm -rf /var/lib/apt/lists/*
+# lld is a single, inherently cross-target linker, so a single x86_64 host build
+# can link for every target we support. We build it with the same x86_64 Bootlin
+# toolchain used for GCC and binutils so the resulting binary shares their glibc
+# baseline. LLVM_STATIC_LINK_CXX_STDLIB statically links libstdc++ but not libgcc,
+# so we add -static-libgcc explicitly; the resulting binary depends only on glibc.
+# The X86, ARM and AArch64 backends cover x86_64, armv7 and aarch64 respectively.
+RUN cmake -G Ninja \
+        -S /build/llvm/llvm \
+        -B . \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DCMAKE_INSTALL_PREFIX=/var/install/lld \
+        -DCMAKE_C_COMPILER=/opt/gcc/x86_64/bin/x86_64-linux-gcc \
+        -DCMAKE_CXX_COMPILER=/opt/gcc/x86_64/bin/x86_64-linux-g++ \
+        -DLLVM_ENABLE_PROJECTS=lld \
+        -DLLVM_TARGETS_TO_BUILD="X86;ARM;AArch64" \
+        -DLLVM_INCLUDE_TESTS=OFF \
+        -DLLVM_INCLUDE_EXAMPLES=OFF \
+        -DLLVM_INCLUDE_BENCHMARKS=OFF \
+        -DLLVM_ENABLE_ZLIB=OFF \
+        -DLLVM_ENABLE_ZSTD=OFF \
+        -DLLVM_ENABLE_LIBXML2=OFF \
+        -DLLVM_ENABLE_TERMINFO=OFF \
+        -DLLVM_STATIC_LINK_CXX_STDLIB=ON \
+        -DCMAKE_EXE_LINKER_FLAGS=-static-libgcc
+RUN ninja lld
+# install-lld installs the unified lld driver plus its flavor symlinks (ld.lld,
+# ld64.lld, lld-link, wasm-ld), which lld registers under the `lld` install
+# component. `gcc -fuse-ld=lld` invokes the ld.lld symlink (the ELF driver); the
+# Mach-O/COFF/wasm symlinks are unused on Linux but harmless.
+RUN ninja install-lld
 
 ####################################################################################################
 # Extra libs
@@ -348,10 +407,12 @@ FROM build_image AS toolchain
 
 COPY --from=gcc /var/install/gcc /var/install/gcc
 COPY --from=binutils /var/install/binutils /var/install/binutils
+COPY --from=lld /var/install/lld /var/install/lld
 COPY --from=libX11 /var/install/libX11 /var/install/libX11
 RUN mkdir --parents /var/builds/toolchain \
         && rsync --archive /var/install/gcc/ /var/builds/toolchain/ \
         && rsync --archive /var/install/binutils/* /var/builds/toolchain/ \
+        && rsync --archive /var/install/lld/* /var/builds/toolchain/ \
         && rsync --archive /var/install/libX11/* /var/builds/toolchain/sysroot/
 RUN --mount=source=dedup,target=/usr/bin/dedup dedup /var/builds/toolchain
 

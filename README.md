@@ -29,3 +29,18 @@ The build process generates optimized toolchain archives:
 
 These archives contain both the GCC binaries and the corresponding sysroot, providing a complete
 hermetic toolchain for each target architecture.
+
+## Linkers
+
+Each toolchain ships with multiple linkers:
+
+- `ld` / `ld.bfd` and `ld.gold` from binutils (GNU ld is the default).
+- `ld.lld` from [LLD](https://lld.llvm.org/), built from source as part of the same pipeline.
+
+LLD is built from the LLVM sources alongside GCC and binutils. Because LLD is a single,
+inherently cross-target linker, one x86_64 host build links for every supported target. To use it
+instead of GNU ld, pass `-fuse-ld=lld` to the compiler:
+
+```shell
+gcc -fuse-ld=lld -o hello hello.c
+```
