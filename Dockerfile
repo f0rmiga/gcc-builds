@@ -23,6 +23,7 @@ SHELL ["/bin/bash", "-c"]
 WORKDIR /
 RUN apt-get update \
         && DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get install --yes \
+                bison \
                 bzip2 \
                 curl \
                 dpkg-dev \
@@ -52,8 +53,9 @@ RUN curl --fail-early --location https://github.com/torvalds/linux/archive/refs/
         | tar --gzip --extract --strip-components=1 --file -
 
 FROM base_image AS glibc_download
+ARG GLIBC_VERSION=2.28
 WORKDIR /downloads/glibc
-RUN curl --fail-early --location https://ftp.gnu.org/gnu/glibc/glibc-2.26.tar.xz \
+RUN curl --fail-early --location https://ftp.gnu.org/gnu/glibc/glibc-${GLIBC_VERSION}.tar.xz \
         | tar --xz --extract --strip-components=1 --file -
 
 FROM base_image AS gcc_download
