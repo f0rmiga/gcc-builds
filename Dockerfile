@@ -116,12 +116,6 @@ RUN curl --fail-early --location https://ftp.gnu.org/gnu/binutils/binutils-2.46.
 FROM base_image AS llvm_download
 ARG LLVM_VERSION=22.1.7
 WORKDIR /downloads/llvm
-# The LLVM monorepo bundles many subprojects we do not need (clang, mlir, ...).
-# Extract only the components required to build lld: the LLVM core, lld itself,
-# the shared CMake modules and the third-party tree referenced by the build.
-# lld's Mach-O backend also includes mach-o/compact_unwind_encoding.h from
-# libunwind/include (referenced as ../libunwind/include from the llvm source
-# root), so that header tree is needed even though we do not build libunwind.
 RUN curl --fail-early --location https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/llvm-project-${LLVM_VERSION}.src.tar.xz \
         | tar --xz --extract --strip-components=1 --file - \
                 "llvm-project-${LLVM_VERSION}.src/cmake" \
@@ -129,6 +123,16 @@ RUN curl --fail-early --location https://github.com/llvm/llvm-project/releases/d
                 "llvm-project-${LLVM_VERSION}.src/libunwind/include" \
                 "llvm-project-${LLVM_VERSION}.src/llvm" \
                 "llvm-project-${LLVM_VERSION}.src/lld"
+FROM base_image AS zlib_download
+ARG ZLIB_VERSION=1.3.1
+WORKDIR /downloads/zlib
+RUN curl --fail-early --location https://github.com/madler/zlib/releases/download/v${ZLIB_VERSION}/zlib-${ZLIB_VERSION}.tar.gz \
+        | tar --gzip --extract --strip-components=1 --file -
+FROM base_image AS zstd_download
+ARG ZSTD_VERSION=1.5.6
+WORKDIR /downloads/zstd
+RUN curl --fail-early --location https://github.com/facebook/zstd/releases/download/v${ZSTD_VERSION}/zstd-${ZSTD_VERSION}.tar.gz \
+        | tar --gzip --extract --strip-components=1 --file -
 FROM base_image AS patchelf_download
 WORKDIR /downloads/patchelf
 RUN curl --fail-early --location https://github.com/NixOS/patchelf/releases/download/0.18.0/patchelf-0.18.0-x86_64.tar.gz \
@@ -241,14 +245,31 @@ RUN make install
 
 FROM build_image AS lld
 COPY --from=llvm_download /downloads/llvm /build/llvm
-WORKDIR /build/llvm/build
 RUN apt-get update \
         && DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC apt-get install --yes \
                 cmake \
                 ninja-build \
         && apt-get clean \
         && rm -rf /var/lib/apt/lists/*
-RUN cmake -G Ninja \
+COPY --from=zlib_download /downloads/zlib /build/zlib
+WORKDIR /build/zlib
+RUN CC=/opt/gcc/x86_64/bin/x86_64-linux-gcc ./configure --static --prefix=/var/install/zlib \
+        && make --jobs $(nproc) \
+        && make install
+COPY --from=zstd_download /downloads/zstd /build/zstd
+WORKDIR /build/zstd/lib
+RUN make --jobs $(nproc) \
+        CC=/opt/gcc/x86_64/bin/x86_64-linux-gcc \
+        PREFIX=/var/install/zstd \
+        install-static install-includes
+WORKDIR /build/llvm/build
+RUN case "${ARCH}" in \
+                x86_64) llvm_target=X86 ;; \
+                armv7) llvm_target=ARM ;; \
+                aarch64) llvm_target=AArch64 ;; \
+                *) >&2 echo "Unsupported ARCH '${ARCH}' for LLVM_TARGETS_TO_BUILD"; exit 1 ;; \
+        esac \
+        && cmake -G Ninja \
         -S /build/llvm/llvm \
         -B . \
         -DCMAKE_BUILD_TYPE=Release \
@@ -256,12 +277,17 @@ RUN cmake -G Ninja \
         -DCMAKE_C_COMPILER=/opt/gcc/x86_64/bin/x86_64-linux-gcc \
         -DCMAKE_CXX_COMPILER=/opt/gcc/x86_64/bin/x86_64-linux-g++ \
         -DLLVM_ENABLE_PROJECTS=lld \
-        -DLLVM_TARGETS_TO_BUILD="X86;ARM;AArch64" \
+        -DLLVM_TARGETS_TO_BUILD="${llvm_target}" \
         -DLLVM_INCLUDE_TESTS=OFF \
         -DLLVM_INCLUDE_EXAMPLES=OFF \
         -DLLVM_INCLUDE_BENCHMARKS=OFF \
-        -DLLVM_ENABLE_ZLIB=OFF \
-        -DLLVM_ENABLE_ZSTD=OFF \
+        -DLLVM_ENABLE_ZLIB=FORCE_ON \
+        -DZLIB_INCLUDE_DIR=/var/install/zlib/include \
+        -DZLIB_LIBRARY=/var/install/zlib/lib/libz.a \
+        -DLLVM_ENABLE_ZSTD=FORCE_ON \
+        -DLLVM_USE_STATIC_ZSTD=ON \
+        -Dzstd_INCLUDE_DIR=/var/install/zstd/include \
+        -Dzstd_LIBRARY=/var/install/zstd/lib/libzstd.a \
         -DLLVM_ENABLE_LIBXML2=OFF \
         -DLLVM_ENABLE_TERMINFO=OFF \
         -DLLVM_STATIC_LINK_CXX_STDLIB=ON \
