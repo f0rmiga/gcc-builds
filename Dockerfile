@@ -134,8 +134,9 @@ WORKDIR /downloads/zstd
 RUN curl --fail-early --location https://github.com/facebook/zstd/releases/download/v${ZSTD_VERSION}/zstd-${ZSTD_VERSION}.tar.gz \
         | tar --gzip --extract --strip-components=1 --file -
 FROM base_image AS patchelf_download
+ARG HOST_ARCH
 WORKDIR /downloads/patchelf
-RUN curl --fail-early --location https://github.com/NixOS/patchelf/releases/download/0.18.0/patchelf-0.18.0-x86_64.tar.gz \
+RUN curl --fail-early --location https://github.com/NixOS/patchelf/releases/download/0.18.0/patchelf-0.18.0-${HOST_ARCH}.tar.gz \
         | tar --gz --extract --strip-components=1 --file -
 
 FROM base_image AS build_image
@@ -166,6 +167,13 @@ WORKDIR /
 ARG ARCH
 ENV ARCH="${ARCH}"
 RUN if [ -z "${ARCH}" ]; then >&2 echo "Missing ARCH argument"; exit 1; fi
+
+ARG HOST_ARCH
+ENV HOST_ARCH="${HOST_ARCH}"
+RUN case "${HOST_ARCH}" in \
+        x86_64|aarch64) ;; \
+        *) >&2 echo "Unsupported HOST_ARCH '${HOST_ARCH}'. Supported: x86_64, aarch64"; exit 1 ;; \
+    esac
 RUN rm --force /lib/cpp \
         && if [ "${ARCH}" = "armv7" ]; then \
                 ln --symbolic /opt/gcc/armv7/bin/arm-linux-gnueabihf-cpp /lib/cpp; \
@@ -253,13 +261,13 @@ RUN apt-get update \
         && rm -rf /var/lib/apt/lists/*
 COPY --from=zlib_download /downloads/zlib /build/zlib
 WORKDIR /build/zlib
-RUN CC=/opt/gcc/x86_64/bin/x86_64-linux-gcc ./configure --static --prefix=/var/install/zlib \
+RUN CC=/opt/gcc/${HOST_ARCH}/bin/${HOST_ARCH}-linux-gcc ./configure --static --prefix=/var/install/zlib \
         && make --jobs $(nproc) \
         && make install
 COPY --from=zstd_download /downloads/zstd /build/zstd
 WORKDIR /build/zstd/lib
 RUN make --jobs $(nproc) \
-        CC=/opt/gcc/x86_64/bin/x86_64-linux-gcc \
+        CC=/opt/gcc/${HOST_ARCH}/bin/${HOST_ARCH}-linux-gcc \
         PREFIX=/var/install/zstd \
         install-static install-includes
 WORKDIR /build/llvm/build
@@ -274,8 +282,10 @@ RUN case "${ARCH}" in \
         -B . \
         -DCMAKE_BUILD_TYPE=Release \
         -DCMAKE_INSTALL_PREFIX=/var/install/lld \
-        -DCMAKE_C_COMPILER=/opt/gcc/x86_64/bin/x86_64-linux-gcc \
-        -DCMAKE_CXX_COMPILER=/opt/gcc/x86_64/bin/x86_64-linux-g++ \
+        -DCMAKE_C_COMPILER=/opt/gcc/${HOST_ARCH}/bin/${HOST_ARCH}-linux-gcc \
+        -DCMAKE_CXX_COMPILER=/opt/gcc/${HOST_ARCH}/bin/${HOST_ARCH}-linux-g++ \
+        -DCMAKE_SYSTEM_NAME=Linux \
+        -DCMAKE_SYSTEM_PROCESSOR=${HOST_ARCH} \
         -DLLVM_ENABLE_PROJECTS=lld \
         -DLLVM_TARGETS_TO_BUILD="${llvm_target}" \
         -DLLVM_INCLUDE_TESTS=OFF \

@@ -14,21 +14,37 @@ using cross-compilation from x86_64.
 
 #### Building the Toolchains
 
+For the default host (`x86_64`)
+
 ```shell
 ./build.sh 14.3.0 x86_64 .
 ./build.sh 14.3.0 armv7 .
 ./build.sh 14.3.0 aarch64 .
 ```
 
+##### Building for Different Hosts
+
+```shell
+./build.sh 14.3.0 x86_64 . aarch64 # Build an aarch64 gcc that can target x86_64.
+./build.sh 14.3.0 x86_64 . x86_64  # Build an x86_64 gcc that can target x86_64.
+./build.sh 14.3.0 aarch64 .        # Shorthand for the above.
+```
+
 #### Output
 
 The build process generates optimized toolchain archives:
 - `gcc-toolchain-14.3.0-x86_64.tar.xz`
-- `gcc-toolchain-14.3.0-armv7.tar.xz` 
+- `gcc-toolchain-14.3.0-armv7.tar.xz`
 - `gcc-toolchain-14.3.0-aarch64.tar.xz`
 
 These archives contain both the GCC binaries and the corresponding sysroot, providing a complete
 hermetic toolchain for each target architecture.
+
+If you have [specified a host](#building-for-different-hosts), the archive names will be keyed by host:
+
+- `gcc-toolchain-14.3.0-x86_64-host-aarch64.tar.xz`
+- `gcc-toolchain-14.3.0-armv7-host-aarch64.tar.xz`
+- `gcc-toolchain-14.3.0-aarch64-host-aarch64.tar.xz`
 
 ## Linkers
 

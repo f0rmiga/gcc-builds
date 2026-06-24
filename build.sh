@@ -18,22 +18,27 @@
 # limitations under the License.
 
 usage() {
-    echo "Usage: $0 <gcc_version> <arch> <output_dir>"
+    echo "Usage: $0 <gcc_version> <arch> <output_dir> <host>"
     echo ""
     echo "  gcc_version  GCC version to build"
     echo "  arch         Target architecture (x86_64, armv7, aarch64)"
     echo "  output_dir   Directory where the toolchain archive will be saved"
+    echo "  host         Host where the toolchain will run on (x86_64, aarch64, default: x86_64)"
     echo ""
     echo "Examples:"
     echo "  $0 14.3.0 x86_64 ."
     echo "  $0 13.2.0 aarch64 ."
+    echo "  $0 13.2.0 aarch64 . aarch64"
     echo ""
-    echo "Output format: gcc-toolchain-{gcc_version}-{arch}.tar.xz"
+    echo "Output format:   gcc-toolchain-{gcc_version}-{arch}-host-{host}.tar.xz"
+    echo "If host==x86_64: gcc-toolchain-{gcc_version}-{arch}.tar.xz"
 }
 
 readonly gcc_version=$1
 readonly arch=$2
 readonly output_dir=$3
+readonly DEFAULT_HOST="x86_64"
+readonly host="${4:-$DEFAULT_HOST}"
 
 set -o errexit -o nounset -o pipefail
 
@@ -76,9 +81,20 @@ case "${arch}" in
         ;;
 esac
 
-echo "INFO: Building GCC ${gcc_version} toolchain for ${arch} architecture..."
+case "${host}" in
+  x86_64|aarch64)
+        ;;
+  *)
+        >&2 echo "ERROR: unsupported host '${host}'. Supported host architectures: x86_64, aarch64"
+        >&2 echo ""
+        usage
+        exit 1
+        ;;
+esac
 
-output_filename="gcc-toolchain-${gcc_version}-${arch}.tar.xz"
+echo "INFO: Building GCC ${gcc_version} toolchain for ${arch} architecture and ${host}..."
+
+output_filename="gcc-toolchain-${gcc_version}-${arch}-host-${host}.tar.xz"
 container_source_dir="/var/builds/toolchain"
 
 echo "INFO: building toolchain inside container..."
@@ -92,6 +108,7 @@ image_tag=$(tr '[:upper:]' '[:lower:]' <<<"${arch}")
     docker build \
         --build-arg ARCH="${arch}" \
         --build-arg GCC_VERSION="${gcc_version}" \
+        --build-arg HOST_ARCH="${host}" \
         --tag "${image_tag}" \
         --target toolchain \
         .)
@@ -124,5 +141,15 @@ source_dir_name=$(basename "${container_source_dir}")
 
 (cd "${tmpdir}/${source_dir_name}"; tar --create --file /dev/stdout . | XZ_DEFAULTS="--threads ${cpus}" xz -5 > "${output}")
 shasum -a 256 "${output}"
+
+# In the default architecture, we should produce binaries that don't specify the host, to keep convention.
+# Copy gcc-toolchain-<version>-<arch>-host-<host>.tar.xz
+# to   gcc-toolchain-<version>-<arch>.tar.xz
+if [[ ${host} == "$DEFAULT_HOST" ]]; then
+    non_qualified_output="$(dirname "${output}")/gcc-toolchain-${gcc_version}-${arch}.tar.xz"
+    echo "INFO: creating convenience copy of '${output}' in '${non_qualified_output}'..."
+    cp "${output}" "${non_qualified_output}"
+    shasum -a 256 "${non_qualified_output}"
+fi
 
 echo "INFO: Successfully created ${output_filename}"
