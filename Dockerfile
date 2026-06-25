@@ -235,6 +235,10 @@ COPY --from=binutils_download /downloads/binutils /build/binutils
 WORKDIR /build/binutils/build
 COPY --from=kernel /var/install/kernel /var/install/gcc/sysroot
 COPY --from=glibc /var/install/glibc /var/install/gcc/sysroot
+# Note that we need everything to be statically linked to support cross-compilation
+# For instance:
+#  - `--with-static-standard-libraries`, which should be turned on when we're building GCC: https://sourceware.org/legacy-ml/gdb-cvs/2019-08/msg00123.html
+#  - `--disable-gprofng`, because it links against dynamic stdlibs regardless of the value of the flag above.
 RUN --mount=source=configure.sh,target=/usr/bin/configure.sh IS_GCC_BUILD=1 configure.sh \
         --enable-64-bit-bfd \
         --enable-default-pie \
@@ -244,6 +248,7 @@ RUN --mount=source=configure.sh,target=/usr/bin/configure.sh IS_GCC_BUILD=1 conf
         --enable-static \
         --with-static-standard-libraries \
         --enable-threads \
+        --disable-gprofng \
         --prefix=/var/install/binutils \
         --with-build-sysroot=/var/install/gcc/sysroot \
         --with-lib-path=/var/install/glibc/usr/lib \
