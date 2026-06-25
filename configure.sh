@@ -68,11 +68,17 @@ elif [[ "${ARCH}" == "x86_64" ]]; then
     readonly target="x86_64-linux"
     args+=(
         --build=x86_64-linux-gnu
-        --host="${target}"
         --target="${target}"
     )
-    readonly toolchain_root="/opt/gcc/x86_64"
-    readonly toolchain_prefix="${toolchain_root}/bin/x86_64-linux"
+    if [[ "${IS_GCC_BUILD:-}" == "1" ]]; then
+        args+=(--host="${host_triplet}")
+        readonly toolchain_root="/opt/gcc/${host_arch}"
+        readonly toolchain_prefix="${toolchain_root}/bin/${host_arch}-linux"
+    else
+        args+=(--host="${target}")
+        readonly toolchain_root="/opt/gcc/x86_64"
+        readonly toolchain_prefix="${toolchain_root}/bin/x86_64-linux"
+    fi
 fi
 
 export AR="${toolchain_prefix}-ar"
