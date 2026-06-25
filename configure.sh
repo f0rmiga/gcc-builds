@@ -103,10 +103,16 @@ readonly common_flags=(
     -fdata-sections
 )
 
+cross_ldflags=""
+if [[ "${host_arch}" != "x86_64" ]]; then
+    cross_ldflags="-static-libgcc -static-libstdc++"
+fi
+readonly cross_ldflags
+
 args+=(
     CFLAGS="${common_flags[*]}"
     CXXFLAGS="${common_flags[*]}"
-    LDFLAGS="-Wl,-z,max-page-size=0x1000 -Wl,--strip-all -Wl,--as-needed"
+    LDFLAGS="-Wl,-z,max-page-size=0x1000 -Wl,--strip-all -Wl,--as-needed ${cross_ldflags}"
 )
 
 ../configure "${args[@]}" 1> >(tee configure.stdout) 2> >(>&2 tee configure.stderr)
