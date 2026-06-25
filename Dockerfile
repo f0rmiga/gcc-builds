@@ -15,6 +15,11 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# Global ARG needed so HOST_ARCH can be used in FROM instructions (stage selectors).
+# This allows us to conditionally depend on either a single gcc build (if HOST_ARCH=x86_64),
+# of a Canadian Cross build (using a bootstrapped gcc to cross-bootstrap gcc for another host).
+ARG HOST_ARCH=x86_64
+
 FROM ubuntu:22.04 AS base_image
 
 WORKDIR /bin
@@ -207,7 +212,36 @@ RUN --mount=source=configure.sh,target=/usr/bin/configure.sh configure.sh \
 RUN make all --jobs $(nproc)
 RUN make DESTDIR=/var/install/glibc install
 
-FROM build_image AS gcc
+# gcc_x86_64: always builds the x86_64-hosted cross-compiler at the requested GCC version,
+# regardless of the top-level HOST_ARCH. For x86_64 builds this IS the final product.
+# For aarch64 builds it is the same-version intermediate for the Canadian cross, ensuring
+# libgcc/libstdc++ are compiled by a matching compiler rather than the bootstrap.
+FROM build_image AS gcc_x86_64
+COPY --from=gcc_download /downloads/gcc /build/gcc
+WORKDIR /build/gcc/build
+COPY --from=kernel /var/install/kernel /var/install/gcc/sysroot
+COPY --from=glibc /var/install/glibc /var/install/gcc/sysroot
+ENV HOST_ARCH=x86_64
+RUN --mount=source=configure.sh,target=/usr/bin/configure.sh IS_GCC_BUILD=1 configure.sh \
+        --disable-bootstrap \
+        --enable-default-pie \
+        --enable-languages=c,c++,fortran,lto \
+        --disable-multilib \
+        --prefix=/var/install/gcc \
+        --enable-libstdcxx-threads \
+        --with-linker-hash-style=gnu \
+        --with-build-sysroot=/var/install/gcc/sysroot \
+        --with-sysroot=/RELOCATABLE_SYSROOT \
+        || (cat config.log && exit 1)
+RUN grep -rl '/RELOCATABLE_SYSROOT' . | xargs sed -i 's|/RELOCATABLE_SYSROOT|$(exec_prefix)/sysroot|g'
+RUN make --jobs $(nproc) all-gcc
+RUN make install-gcc
+RUN PATH="/var/install/gcc/bin:${PATH}" make --jobs $(nproc)
+RUN make install || (cat config.log && exit 1)
+
+# gcc_aarch64: Canadian cross — uses gcc_x86_64 to build another gcc that runs in aarch64
+FROM build_image AS gcc_aarch64
+COPY --from=gcc_x86_64 /var/install/gcc /opt/gcc/same_version_cross
 COPY --from=gcc_download /downloads/gcc /build/gcc
 WORKDIR /build/gcc/build
 COPY --from=kernel /var/install/kernel /var/install/gcc/sysroot
@@ -226,9 +260,14 @@ RUN --mount=source=configure.sh,target=/usr/bin/configure.sh IS_GCC_BUILD=1 conf
 RUN grep -rl '/RELOCATABLE_SYSROOT' . | xargs sed -i 's|/RELOCATABLE_SYSROOT|$(exec_prefix)/sysroot|g'
 RUN make --jobs $(nproc) all-gcc
 RUN make install-gcc
-ENV PATH="/var/install/gcc/bin:${PATH}"
-RUN make --jobs $(nproc)
-RUN make install
+RUN make --jobs $(nproc) \
+        GCC_FOR_TARGET="/opt/gcc/same_version_cross/bin/aarch64-linux-gcc" \
+        CXX_FOR_TARGET="/opt/gcc/same_version_cross/bin/aarch64-linux-g++"
+RUN make install || (cat config.log && exit 1)
+
+# pick gcc_x86_64 or gcc_aarch64 based on HOST_ARCH.
+ARG HOST_ARCH=x86_64
+FROM gcc_${HOST_ARCH} AS gcc
 
 FROM build_image AS binutils
 COPY --from=binutils_download /downloads/binutils /build/binutils
