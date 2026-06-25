@@ -301,7 +301,13 @@ RUN case "${ARCH}" in \
         -DLLVM_ENABLE_LIBXML2=OFF \
         -DLLVM_ENABLE_TERMINFO=OFF \
         -DLLVM_STATIC_LINK_CXX_STDLIB=ON \
-        -DCMAKE_EXE_LINKER_FLAGS=-static-libgcc
+        -DCMAKE_EXE_LINKER_FLAGS="-static-libgcc -static-libstdc++" \
+        -DCMAKE_SYSROOT=/opt/gcc/${HOST_ARCH}/sysroot \
+        -DCMAKE_FIND_ROOT_PATH="/opt/gcc/${HOST_ARCH}/" \
+        -DCMAKE_FIND_ROOT_PATH_MODE_PROGRAM=NEVER \
+        -DCMAKE_FIND_ROOT_PATH_MODE_LIBRARY=ONLY \
+        -DCMAKE_FIND_ROOT_PATH_MODE_INCLUDE=ONLY \
+        -DCMAKE_FIND_ROOT_PATH_MODE_PACKAGE=ONLY
 RUN ninja lld
 RUN ninja install-lld
 
