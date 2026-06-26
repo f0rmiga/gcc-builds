@@ -239,41 +239,12 @@ RUN make install-gcc
 RUN PATH="/var/install/gcc/bin:${PATH}" make --jobs $(nproc)
 RUN make install || (cat config.log && exit 1)
 
-# gcc_aarch64: Canadian cross — uses gcc_x86_64 to build another gcc that runs in aarch64
-FROM build_image AS gcc_aarch64
-COPY --from=gcc_x86_64 /var/install/gcc /opt/gcc/same_version_cross
-COPY --from=gcc_download /downloads/gcc /build/gcc
-WORKDIR /build/gcc/build
-COPY --from=kernel /var/install/kernel /var/install/gcc/sysroot
-COPY --from=glibc /var/install/glibc /var/install/gcc/sysroot
-RUN --mount=source=configure.sh,target=/usr/bin/configure.sh IS_GCC_BUILD=1 configure.sh \
-        --disable-bootstrap \
-        --enable-default-pie \
-        --enable-languages=c,c++,fortran,lto \
-        --disable-multilib \
-        --prefix=/var/install/gcc \
-        --enable-libstdcxx-threads \
-        --with-linker-hash-style=gnu \
-        --with-build-sysroot=/var/install/gcc/sysroot \
-        --with-sysroot=/RELOCATABLE_SYSROOT \
-        || (cat config.log && exit 1)
-RUN grep -rl '/RELOCATABLE_SYSROOT' . | xargs sed -i 's|/RELOCATABLE_SYSROOT|$(exec_prefix)/sysroot|g'
-RUN make --jobs $(nproc) all-gcc
-RUN make install-gcc
-RUN make --jobs $(nproc) \
-        GCC_FOR_TARGET="/opt/gcc/same_version_cross/bin/aarch64-linux-gcc" \
-        CXX_FOR_TARGET="/opt/gcc/same_version_cross/bin/aarch64-linux-g++"
-RUN make install || (cat config.log && exit 1)
-
-# pick gcc_x86_64 or gcc_aarch64 based on HOST_ARCH.
-ARG HOST_ARCH=x86_64
-FROM gcc_${HOST_ARCH} AS gcc
-
-FROM build_image AS binutils
+FROM build_image AS binutils_x86_64
 COPY --from=binutils_download /downloads/binutils /build/binutils
 WORKDIR /build/binutils/build
 COPY --from=kernel /var/install/kernel /var/install/gcc/sysroot
 COPY --from=glibc /var/install/glibc /var/install/gcc/sysroot
+ENV HOST_ARCH=x86_64
 # Note that we need everything to be statically linked to support cross-compilation
 # For instance:
 #  - `--with-static-standard-libraries`, which should be turned on when we're building GCC: https://sourceware.org/legacy-ml/gdb-cvs/2019-08/msg00123.html
@@ -294,6 +265,76 @@ RUN --mount=source=configure.sh,target=/usr/bin/configure.sh IS_GCC_BUILD=1 conf
         || (cat config.log && exit 1)
 RUN make --jobs $(nproc)
 RUN make install
+
+# gcc_aarch64: Canadian cross. Uses
+# - gcc_x86_64 as the compiler and
+# - binutils_x86_64 as the cross-assembler and linker
+# to build a gcc that runs on aarch64.
+FROM build_image AS gcc_aarch64
+COPY --from=gcc_x86_64 /var/install/gcc /opt/gcc/same_version_cross
+COPY --from=binutils_x86_64 /var/install/binutils /opt/gcc/same_version_cross
+COPY --from=gcc_download /downloads/gcc /build/gcc
+WORKDIR /build/gcc/build
+COPY --from=kernel /var/install/kernel /var/install/gcc/sysroot
+COPY --from=glibc /var/install/glibc /var/install/gcc/sysroot
+RUN --mount=source=configure.sh,target=/usr/bin/configure.sh \
+    IS_GCC_BUILD=1 configure.sh \
+        --disable-bootstrap \
+        --enable-default-pie \
+        --enable-languages=c,c++,fortran,lto \
+        --disable-multilib \
+        --prefix=/var/install/gcc \
+        --enable-libstdcxx-threads \
+        --with-linker-hash-style=gnu \
+        --with-build-sysroot=/var/install/gcc/sysroot \
+        --with-sysroot=/RELOCATABLE_SYSROOT \
+        || (cat config.log && exit 1)
+RUN grep -rl '/RELOCATABLE_SYSROOT' . | xargs sed -i 's|/RELOCATABLE_SYSROOT|$(exec_prefix)/sysroot|g'
+RUN make --jobs $(nproc) all-gcc
+RUN make install-gcc
+RUN PATH="/opt/gcc/same_version_cross/bin:${PATH}" make --jobs $(nproc) \
+        GCC_FOR_TARGET="/opt/gcc/same_version_cross/bin/aarch64-linux-gcc" \
+        CC_FOR_TARGET="/opt/gcc/same_version_cross/bin/aarch64-linux-gcc" \
+        CXX_FOR_TARGET="/opt/gcc/same_version_cross/bin/aarch64-linux-g++" \
+        RAW_CXX_FOR_TARGET="/opt/gcc/same_version_cross/bin/aarch64-linux-g++" \
+        GFORTRAN_FOR_TARGET="/opt/gcc/same_version_cross/bin/aarch64-linux-gfortran"
+RUN make install || (cat config.log && exit 1)
+
+
+FROM build_image AS binutils_aarch64
+COPY --from=binutils_download /downloads/binutils /build/binutils
+WORKDIR /build/binutils/build
+COPY --from=kernel /var/install/kernel /var/install/gcc/sysroot
+COPY --from=glibc /var/install/glibc /var/install/gcc/sysroot
+ENV HOST_ARCH=aarch64
+# Note that we need everything to be statically linked to support cross-compilation
+# For instance:
+#  - `--with-static-standard-libraries`, which should be turned on when we're building GCC: https://sourceware.org/legacy-ml/gdb-cvs/2019-08/msg00123.html
+#  - `--disable-gprofng`, because it links against dynamic stdlibs regardless of the value of the flag above.
+RUN --mount=source=configure.sh,target=/usr/bin/configure.sh IS_GCC_BUILD=1 configure.sh \
+        --enable-64-bit-bfd \
+        --enable-default-pie \
+        --enable-gold \
+        --enable-plugins \
+        --disable-shared \
+        --enable-static \
+        --with-static-standard-libraries \
+        --enable-threads \
+        --disable-gprofng \
+        --prefix=/var/install/binutils \
+        --with-build-sysroot=/var/install/gcc/sysroot \
+        --with-lib-path=/var/install/glibc/usr/lib \
+        || (cat config.log && exit 1)
+RUN make --jobs $(nproc)
+RUN make install
+
+# pick x86_64 or aarch64 versions for gcc and binutils,
+# based on HOST_ARCH.
+ARG HOST_ARCH=x86_64
+FROM gcc_${HOST_ARCH} AS gcc
+
+ARG HOST_ARCH=x86_64
+FROM binutils_${HOST_ARCH} AS binutils
 
 FROM build_image AS lld
 COPY --from=llvm_download /downloads/llvm /build/llvm
