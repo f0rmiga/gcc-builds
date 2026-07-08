@@ -279,10 +279,11 @@ COPY --from=gcc_download /downloads/gcc /build/gcc
 WORKDIR /build/gcc/build
 COPY --from=kernel /var/install/kernel /var/install/gcc/sysroot
 COPY --from=glibc /var/install/glibc /var/install/gcc/sysroot
-# The same-version cross toolchain comes first in PATH so that configure resolves the
-# ${target}-prefixed tools used to build the target libraries (gcc, g++, gfortran, as, ld,
-# ...) from it — for any target — instead of the bootstrap toolchain in /opt/gcc. The
-# host-side compilers are unaffected: configure.sh exports those as absolute paths.
+# The same-version cross toolchain comes first in PATH so that the ${target}-prefixed
+# binutils and any tool not explicitly pinned resolve to it instead of the bootstrap
+# toolchain in /opt/gcc. The target compilers (*_FOR_TARGET) are pinned to absolute paths
+# under /opt/gcc/same_version_cross by configure.sh, and the host-side compilers are
+# unaffected: configure.sh exports those as absolute paths too.
 ENV PATH="/opt/gcc/same_version_cross/bin:${PATH}"
 RUN --mount=source=configure.sh,target=/usr/bin/configure.sh \
     IS_GCC_BUILD=1 configure.sh \

@@ -96,6 +96,23 @@ export STRIP="${toolchain_prefix}-strip"
 
 args+=("${@}")
 
+# Canadian cross (build != host): GCC's configure cannot use the just-built compiler to
+# build the target libraries, and its fallback resolution is unsafe — when build == target
+# (e.g. an x86_64-targeting toolchain hosted on aarch64) it accepts the build machine's
+# unprefixed 'cc' (the distro compiler, wrong version) because no '${target}-cc' name
+# exists anywhere. Pin every target compiler to the same-version cross toolchain instead.
+if [[ "${IS_GCC_BUILD:-}" == "1" && "${host_arch}" != "x86_64" \
+        && -d /opt/gcc/same_version_cross ]]; then
+    readonly cross_bin="/opt/gcc/same_version_cross/bin"
+    args+=(
+        GCC_FOR_TARGET="${cross_bin}/${target}-gcc"
+        CC_FOR_TARGET="${cross_bin}/${target}-gcc"
+        CXX_FOR_TARGET="${cross_bin}/${target}-g++"
+        RAW_CXX_FOR_TARGET="${cross_bin}/${target}-g++"
+        GFORTRAN_FOR_TARGET="${cross_bin}/${target}-gfortran"
+    )
+fi
+
 readonly common_flags=(
     -O2
     -falign-functions=32
