@@ -103,8 +103,11 @@ readonly common_flags=(
     -fdata-sections
 )
 
+# Host-side binaries (IS_GCC_BUILD) running on a non-x86_64 host must link libgcc/libstdc++
+# statically to stay hermetic. Target-side artifacts (glibc, libX11, ...) must not vary with
+# HOST_ARCH, so this never applies to them.
 cross_ldflags=""
-if [[ "${host_arch}" != "x86_64" ]]; then
+if [[ "${IS_GCC_BUILD:-}" == "1" && "${host_arch}" != "x86_64" ]]; then
     cross_ldflags="-static-libgcc -static-libstdc++"
 fi
 readonly cross_ldflags

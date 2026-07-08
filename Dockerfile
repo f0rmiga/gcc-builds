@@ -403,7 +403,10 @@ RUN ninja install-lld
 ####################################################################################################
 
 FROM build_image AS libX11
-COPY --from=gcc /var/install/gcc /var/install/gcc
+# Use the always-x86_64-hosted gcc here: this stage produces target-side sysroot libraries,
+# so its output must not vary with HOST_ARCH — and with HOST_ARCH=aarch64 the selected `gcc`
+# stage binaries could not execute on the x86_64 build machine anyway.
+COPY --from=gcc_x86_64 /var/install/gcc /var/install/gcc
 ENV PATH="/var/install/gcc/bin:${PATH}"
 
 # Provides an up-to-date config.sub/config.guess that recognizes aarch64. The
