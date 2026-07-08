@@ -139,9 +139,10 @@ WORKDIR /downloads/zstd
 RUN curl --fail-early --location https://github.com/facebook/zstd/releases/download/v${ZSTD_VERSION}/zstd-${ZSTD_VERSION}.tar.gz \
         | tar --gzip --extract --strip-components=1 --file -
 FROM base_image AS patchelf_download
-ARG HOST_ARCH
 WORKDIR /downloads/patchelf
-RUN curl --fail-early --location https://github.com/NixOS/patchelf/releases/download/0.18.0/patchelf-0.18.0-${HOST_ARCH}.tar.gz \
+# patchelf runs on the build machine (not on HOST_ARCH), and it can edit ELF files of any
+# architecture, so it must match the machine performing the build.
+RUN curl --fail-early --location https://github.com/NixOS/patchelf/releases/download/0.18.0/patchelf-0.18.0-$(uname -m).tar.gz \
         | tar --gz --extract --strip-components=1 --file -
 
 FROM base_image AS build_image
@@ -539,16 +540,28 @@ RUN --mount=source=dedup,target=/usr/bin/dedup dedup /var/builds/toolchain
 
 # We patch the shared libraries to set the rpath to $ORIGIN, so that during runtime the
 # libraries are found in the same directory as the executable.
+# Only real ELF files are patched: '*.so*' also matches linker scripts (e.g. glibc's libc.so)
+# and symlinks. Failures are fatal, unlike `find -exec ... \;` which swallows them.
 COPY --from=patchelf_download /downloads/patchelf /var/install/patchelf
-RUN find /var/builds/toolchain \
-        -name '*.so*' \
-        -exec /var/install/patchelf/bin/patchelf --set-rpath '$ORIGIN/' {} \;
+RUN set -o errexit -o nounset -o pipefail \
+        && while IFS= read -r -d '' elf; do \
+                if file --brief "${elf}" | grep --quiet '^ELF'; then \
+                        /var/install/patchelf/bin/patchelf --set-rpath '$ORIGIN/' "${elf}"; \
+                fi; \
+        done < <(find /var/builds/toolchain -name '*.so*' -type f -print0)
 
-RUN find /var/builds/toolchain/bin -type f \
-        -exec strip \
-            --strip-all \
-            --remove-section=.comment \
-            --remove-section=.note \
-            --remove-section=.eh_frame \
-            --remove-section=.eh_frame_hdr \
-            {} \;
+# Strip with the binutils matching HOST_ARCH: the shipped binaries are HOST_ARCH ELF files,
+# which the build machine's own strip cannot process when HOST_ARCH differs from it.
+RUN set -o errexit -o nounset -o pipefail \
+        && strip_tool="/opt/gcc/${HOST_ARCH}/bin/${HOST_ARCH}-linux-strip" \
+        && while IFS= read -r -d '' elf; do \
+                if file --brief "${elf}" | grep --quiet '^ELF'; then \
+                        "${strip_tool}" \
+                            --strip-all \
+                            --remove-section=.comment \
+                            --remove-section=.note \
+                            --remove-section=.eh_frame \
+                            --remove-section=.eh_frame_hdr \
+                            "${elf}"; \
+                fi; \
+        done < <(find /var/builds/toolchain/bin -type f -print0)
