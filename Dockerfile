@@ -17,7 +17,7 @@
 
 # Global ARG needed so HOST_ARCH can be used in FROM instructions (stage selectors).
 # This allows us to conditionally depend on either a single gcc build (if HOST_ARCH=x86_64),
-# of a Canadian Cross build (using a bootstrapped gcc to cross-bootstrap gcc for another host).
+# or a Canadian Cross build (using a bootstrapped gcc to cross-bootstrap gcc for another host).
 ARG HOST_ARCH=x86_64
 
 FROM ubuntu:22.04 AS base_image
@@ -241,16 +241,17 @@ ENV PATH="/var/install/gcc/bin:${PATH}"
 RUN make --jobs $(nproc)
 RUN make install
 
-FROM build_image AS binutils_x86_64
+FROM build_image AS binutils_base
 COPY --from=binutils_download /downloads/binutils /build/binutils
 WORKDIR /build/binutils/build
 COPY --from=kernel /var/install/kernel /var/install/gcc/sysroot
 COPY --from=glibc /var/install/glibc /var/install/gcc/sysroot
+
+# binutils_x86_64: always x86_64-hosted. For x86_64 builds this is the final product; for
+# aarch64 builds it provides the same-version cross assembler and linker consumed by the
+# Canadian cross (gcc_aarch64).
+FROM binutils_base AS binutils_x86_64
 ENV HOST_ARCH=x86_64
-# Note that we need everything to be statically linked to support cross-compilation
-# For instance:
-#  - `--with-static-standard-libraries`, which should be turned on when we're building GCC: https://sourceware.org/legacy-ml/gdb-cvs/2019-08/msg00123.html
-#  - `--disable-gprofng`, because it links against dynamic stdlibs regardless of the value of the flag above.
 RUN --mount=source=configure.sh,target=/usr/bin/configure.sh IS_GCC_BUILD=1 configure.sh \
         --enable-64-bit-bfd \
         --enable-default-pie \
@@ -260,7 +261,6 @@ RUN --mount=source=configure.sh,target=/usr/bin/configure.sh IS_GCC_BUILD=1 conf
         --enable-static \
         --with-static-standard-libraries \
         --enable-threads \
-        --disable-gprofng \
         --prefix=/var/install/binutils \
         --with-build-sysroot=/var/install/gcc/sysroot \
         --with-lib-path=/var/install/glibc/usr/lib \
@@ -303,16 +303,13 @@ RUN make --jobs $(nproc)
 RUN make install
 
 
-FROM build_image AS binutils_aarch64
-COPY --from=binutils_download /downloads/binutils /build/binutils
-WORKDIR /build/binutils/build
-COPY --from=kernel /var/install/kernel /var/install/gcc/sysroot
-COPY --from=glibc /var/install/glibc /var/install/gcc/sysroot
-ENV HOST_ARCH=aarch64
+# binutils_aarch64: cross-compiled with the bootstrap toolchain so it runs on aarch64.
 # Note that we need everything to be statically linked to support cross-compilation
 # For instance:
 #  - `--with-static-standard-libraries`, which should be turned on when we're building GCC: https://sourceware.org/legacy-ml/gdb-cvs/2019-08/msg00123.html
 #  - `--disable-gprofng`, because it links against dynamic stdlibs regardless of the value of the flag above.
+FROM binutils_base AS binutils_aarch64
+ENV HOST_ARCH=aarch64
 RUN --mount=source=configure.sh,target=/usr/bin/configure.sh IS_GCC_BUILD=1 configure.sh \
         --enable-64-bit-bfd \
         --enable-default-pie \
@@ -330,12 +327,10 @@ RUN --mount=source=configure.sh,target=/usr/bin/configure.sh IS_GCC_BUILD=1 conf
 RUN make --jobs $(nproc)
 RUN make install
 
-# pick x86_64 or aarch64 versions for gcc and binutils,
-# based on HOST_ARCH.
-ARG HOST_ARCH=x86_64
+# Pick the x86_64 or aarch64 variants for gcc and binutils based on HOST_ARCH.
+# The interpolation below is resolved from the global ARG declared at the top of this file.
 FROM gcc_${HOST_ARCH} AS gcc
 
-ARG HOST_ARCH=x86_64
 FROM binutils_${HOST_ARCH} AS binutils
 
 FROM build_image AS lld
