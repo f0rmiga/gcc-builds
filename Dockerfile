@@ -237,8 +237,9 @@ RUN --mount=source=configure.sh,target=/usr/bin/configure.sh IS_GCC_BUILD=1 conf
 RUN grep -rl '/RELOCATABLE_SYSROOT' . | xargs sed -i 's|/RELOCATABLE_SYSROOT|$(exec_prefix)/sysroot|g'
 RUN make --jobs $(nproc) all-gcc
 RUN make install-gcc
-RUN PATH="/var/install/gcc/bin:${PATH}" make --jobs $(nproc)
-RUN make install || (cat config.log && exit 1)
+ENV PATH="/var/install/gcc/bin:${PATH}"
+RUN make --jobs $(nproc)
+RUN make install
 
 FROM build_image AS binutils_x86_64
 COPY --from=binutils_download /downloads/binutils /build/binutils
@@ -278,6 +279,11 @@ COPY --from=gcc_download /downloads/gcc /build/gcc
 WORKDIR /build/gcc/build
 COPY --from=kernel /var/install/kernel /var/install/gcc/sysroot
 COPY --from=glibc /var/install/glibc /var/install/gcc/sysroot
+# The same-version cross toolchain comes first in PATH so that configure resolves the
+# ${target}-prefixed tools used to build the target libraries (gcc, g++, gfortran, as, ld,
+# ...) from it — for any target — instead of the bootstrap toolchain in /opt/gcc. The
+# host-side compilers are unaffected: configure.sh exports those as absolute paths.
+ENV PATH="/opt/gcc/same_version_cross/bin:${PATH}"
 RUN --mount=source=configure.sh,target=/usr/bin/configure.sh \
     IS_GCC_BUILD=1 configure.sh \
         --disable-bootstrap \
@@ -293,13 +299,8 @@ RUN --mount=source=configure.sh,target=/usr/bin/configure.sh \
 RUN grep -rl '/RELOCATABLE_SYSROOT' . | xargs sed -i 's|/RELOCATABLE_SYSROOT|$(exec_prefix)/sysroot|g'
 RUN make --jobs $(nproc) all-gcc
 RUN make install-gcc
-RUN PATH="/opt/gcc/same_version_cross/bin:${PATH}" make --jobs $(nproc) \
-        GCC_FOR_TARGET="/opt/gcc/same_version_cross/bin/aarch64-linux-gcc" \
-        CC_FOR_TARGET="/opt/gcc/same_version_cross/bin/aarch64-linux-gcc" \
-        CXX_FOR_TARGET="/opt/gcc/same_version_cross/bin/aarch64-linux-g++" \
-        RAW_CXX_FOR_TARGET="/opt/gcc/same_version_cross/bin/aarch64-linux-g++" \
-        GFORTRAN_FOR_TARGET="/opt/gcc/same_version_cross/bin/aarch64-linux-gfortran"
-RUN make install || (cat config.log && exit 1)
+RUN make --jobs $(nproc)
+RUN make install
 
 
 FROM build_image AS binutils_aarch64
